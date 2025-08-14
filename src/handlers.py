@@ -7,9 +7,10 @@ import os
 import re
 import json
 import datetime
-from main import bot
+from bot_instance import bot
 from ocr import process_menu_image
 from html_generator import generate_html_menu
+from image_fetcher import fetch_images_for_menu
 
 router = Router()
 
@@ -19,11 +20,11 @@ def register_handlers(dp):
 
 @router.message(Command('start'))
 async def cmd_start(message: Message):
-    await message.answer('Привет! Отправь мне фотографию меню, и я сделаю из него удобный HTML-файл.')
+    await message.answer('Привет! Отправь мне фотографию меню, и я сделаю из него удобный HTML-файл с картинками.')
 
 @router.message(Command('help'))
 async def cmd_help(message: Message):
-    await message.answer('Этот бот анализирует фото меню и возвращает красивый и удобный HTML-файл.')
+    await message.answer('Этот бот анализирует фото меню, подбирает для блюд изображения и возвращает красивый HTML-файл.')
 
 @router.message(lambda message: message.photo)
 async def handle_photo(message: Message):
@@ -34,59 +35,29 @@ async def handle_photo(message: Message):
     temp_dir = os.path.join(os.path.dirname(__file__), '..', 'temp')
     os.makedirs(temp_dir, exist_ok=True)
     
-    # Создаем временные пути для файлов
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    unique_id = f"{photo.file_unique_id}_{timestamp}"
-    download_path = os.path.join(temp_dir, f'{unique_id}.jpg')
-    html_output_path = os.path.join(temp_dir, f'menu_{timestamp}.html')
+    unique_id = f"{message.from_user.id}_{timestamp}"
+    download_path = os.path.join(temp_dir, f'menu_{unique_id}.jpg')
+    html_output_path = os.path.join(temp_dir, f'menu_{unique_id}.html')
     
     try:
         await bot.download(photo, destination=download_path)
         
         # Шаг 1: Распознавание текста
-        await processing_msg.edit_text('Шаг 1/2: Распознаю текст с изображения...')
+        await processing_msg.edit_text('Шаг 1/3: Распознаю текст с изображения...')
         extracted_text = await process_menu_image(download_path)
         
         if not extracted_text:
             await message.answer('Не удалось распознать текст. Пожалуйста, отправьте более четкое фото.')
             return
         
-        # Шаг 2: Извлечение JSON и генерация HTML
-        await processing_msg.edit_text('Шаг 2/2: Создаю HTML-версию меню...')
+        # Шаг 2: Извлечение JSON
+        await processing_msg.edit_text('Шаг 2/3: Анализирую меню...')
         try:
-            # Убираем обертку ```json ... ```, если она есть
             match = re.search(r'```json\s*([\s\S]+?)\s*```', extracted_text, re.DOTALL)
-            if match:
-                json_str = match.group(1)
-            else:
-                json_str = extracted_text
-
-            try:
-                # Пытаемся спарсить как есть
-                data = json.loads(json_str)
-            except json.JSONDecodeError:
-                # Если не удалось и ответ частичный, пытаемся восстановить JSON
-                if '"isPartial": true' in json_str:
-                    print("JSON parsing failed, but isPartial is true. Attempting to repair.")
-                    # Ищем последнее корректное закрытие объекта в массиве
-                    last_obj_end = json_str.rfind('},')
-                    if last_obj_end != -1:
-                        # Обрезаем строку до конца последнего целого объекта
-                        repaired_json_str = json_str[:last_obj_end + 1]
-                        # Закрываем массив и корневой объект
-                        repaired_json_str += '\n  ]\n}'
-                        try:
-                            data = json.loads(repaired_json_str)
-                            data['isPartial'] = True # Убедимся, что флаг установлен
-                            print("Successfully parsed repaired JSON.")
-                        except json.JSONDecodeError as e2:
-                            print(f"Failed to parse even the repaired JSON: {e2}")
-                            raise # Перебрасываем исходную ошибку, если ремонт не удался
-                    else:
-                        raise # Не смогли найти, где обрезать, перебрасываем
-                else:
-                    raise # Ошибка не связана с частичным ответом, перебрасываем
-
+            json_str = match.group(1) if match else extracted_text
+            
+            data = json.loads(json_str)
             menu_data = data.get("menu", [])
             is_partial = data.get("isPartial", False)
 
@@ -96,17 +67,20 @@ async def handle_photo(message: Message):
             return
 
         if not menu_data:
-            await message.answer('Не удалось извлечь ни одного блюда из меню. Пожалуйста, попробуйте с более четким фото.')
+            await message.answer('Не удалось извлечь ни одного блюда из меню.')
             return
 
+        # Шаг 3: Подбор изображений
+        await processing_msg.edit_text('Шаг 3/3: Подбираю изображения для блюд...')
+        await fetch_images_for_menu(menu_data)
+        
+        # Генерация HTML
         generate_html_menu(menu_data, html_output_path)
 
-        # Формируем подпись к документу
         caption = "Ваше меню готово!"
         if is_partial:
-            caption += "\n\n⚠️ *Обратите внимание: меню было распознано не полностью из-за большого размера. Была обработана только часть.*"
+            caption += "\n\n⚠️ *Обратите внимание: меню было распознано не полностью. Была обработана только часть.*"
 
-        # Отправка результата
         await processing_msg.delete()
         await message.answer_document(
             FSInputFile(html_output_path), 
@@ -118,8 +92,12 @@ async def handle_photo(message: Message):
         await processing_msg.delete()
         await message.answer(f'Произошла критическая ошибка: {str(e)}')
     finally:
-        # Удаляем временные файлы
-        if os.path.exists(download_path):
-            os.remove(download_path)
-        if os.path.exists(html_output_path):
-            os.remove(html_output_path)
+        # Удаляем временные файлы (теперь только исходник и HTML)
+        for file_path in [download_path, html_output_path]:
+            if file_path and os.path.exists(file_path):
+                try:
+                    os.remove(file_path)
+                except OSError as e:
+                    print(f"Ошибка при удалении файла {file_path}: {e}")
+
+

@@ -31,7 +31,7 @@ def generate_html_menu(menu_data: list, output_path: str = "menu.html"):
         h2 { color: #1d3557; border-bottom: 3px solid #457b9d; padding-bottom: 10px; margin-top: 45px; font-size: 2.2em; }
         .dish { display: flex; gap: 20px; border-bottom: 1px solid #dee2e6; padding: 25px 10px; margin-bottom: 0; align-items: flex-start; }
         .dish:last-child { border-bottom: none; }
-        .dish-img { width: 120px; height: 120px; object-fit: cover; border-radius: 8px; }
+        .dish-img { width: 120px; height: 120px; object-fit: cover; border-radius: 8px; background-color: #e9ecef; }
         .dish-details { flex: 1; }
         .dish-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; flex-wrap: wrap; gap: 10px; }
         .dish-name { font-size: 1.6em; font-weight: 600; color: #005f73; }
@@ -65,13 +65,11 @@ def generate_html_menu(menu_data: list, output_path: str = "menu.html"):
     for category, dishes in sorted_grouped_menu.items():
         body_content += f'<section id="{category.lower().replace(" ", "-")}"><h2>{category}</h2>'
         for dish in dishes:
-            image_url = dish.get("image")
-            if image_url == "placeholder":
-                image_url = "https://via.placeholder.com/150"
+            # Используем URL напрямую или заглушку, если URL отсутствует
+            image_url = dish.get("image") or "https://via.placeholder.com/400x300/?text=No+Image"
 
             body_content += '<div class="dish">'
-            if image_url:
-                body_content += f'<img src="{image_url}" alt="{dish.get("translatedName", "")}" class="dish-img">'
+            body_content += f'<img src="{image_url}" alt="{dish.get("translatedName", "")}" class="dish-img">'
             
             body_content += '<div class="dish-details">'
             body_content += '<div class="dish-header">'
@@ -118,7 +116,13 @@ def main():
     try:
         with open(menu_file, 'r', encoding='utf-8') as f:
             menu_data = json.load(f)
-        generate_html_menu(menu_data, "menu.html")
+        
+        # Для теста имитируем получение URL
+        from image_fetcher import get_image_url
+        for item in menu_data.get("menu", []):
+            item["image"] = get_image_url(item.get("translatedName"))
+
+        generate_html_menu(menu_data.get("menu", []), "menu.html")
     except (json.JSONDecodeError, Exception) as e:
         print(f"Ошибка при чтении или обработке menu.json: {e}")
 

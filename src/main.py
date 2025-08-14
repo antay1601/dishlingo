@@ -1,20 +1,26 @@
-from aiogram import Bot, Dispatcher
-from aiogram.enums import ParseMode
-from aiogram.client.default import DefaultBotProperties
-from config import BOT_TOKEN
+import asyncio
+from bot_instance import dp, bot
+from handlers import register_handlers
+from image_fetcher import close_http_client
 
-bot = Bot(
-    token=BOT_TOKEN,
-    default=DefaultBotProperties(parse_mode=ParseMode.HTML)
-)
-dp = Dispatcher()
+async def on_shutdown():
+    """Вызывается при остановке бота для очистки ресурсов."""
+    print("Завершение работы, закрытие HTTP-клиента...")
+    await close_http_client()
 
 async def main():
+    # Регистрируем обработчик завершения работы
+    dp.shutdown.register(on_shutdown)
+    
+    # Регистрируем хендлеры сообщений
+    register_handlers(dp)
+    
+    # Запускаем бота
+    print("Бот запущен...")
     await dp.start_polling(bot)
 
 if __name__ == '__main__':
-    import asyncio
-    from handlers import register_handlers
-
-    register_handlers(dp)
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except (KeyboardInterrupt, SystemExit):
+        print("Бот остановлен.")
