@@ -1,4 +1,3 @@
-
 import json
 from pathlib import Path
 from collections import defaultdict
@@ -30,8 +29,10 @@ def generate_html_menu(menu_data: list, output_path: str = "menu.html"):
         .container { max-width: 900px; margin: auto; background-color: #ffffff; padding: 20px 40px; border-radius: 12px; box-shadow: 0 8px 25px rgba(0,0,0,0.1); }
         h1 { text-align: center; color: #e63946; font-size: 2.8em; margin-bottom: 25px; font-weight: 700; }
         h2 { color: #1d3557; border-bottom: 3px solid #457b9d; padding-bottom: 10px; margin-top: 45px; font-size: 2.2em; }
-        .dish { border-bottom: 1px solid #dee2e6; padding: 25px 10px; margin-bottom: 0; }
+        .dish { display: flex; gap: 20px; border-bottom: 1px solid #dee2e6; padding: 25px 10px; margin-bottom: 0; align-items: flex-start; }
         .dish:last-child { border-bottom: none; }
+        .dish-img { width: 120px; height: 120px; object-fit: cover; border-radius: 8px; }
+        .dish-details { flex: 1; }
         .dish-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; flex-wrap: wrap; gap: 10px; }
         .dish-name { font-size: 1.6em; font-weight: 600; color: #005f73; }
         .dish-price { font-size: 1.5em; font-weight: 700; color: #343a40; white-space: nowrap; margin-left: 20px; }
@@ -44,6 +45,8 @@ def generate_html_menu(menu_data: list, output_path: str = "menu.html"):
             .container { padding: 15px 20px; }
             h1 { font-size: 2.2em; }
             h2 { font-size: 1.8em; }
+            .dish { flex-direction: column; }
+            .dish-img { width: 100%; height: auto; margin-bottom: 15px; }
             .dish-name { font-size: 1.3em; }
             .dish-price { font-size: 1.2em; }
         }
@@ -62,7 +65,15 @@ def generate_html_menu(menu_data: list, output_path: str = "menu.html"):
     for category, dishes in sorted_grouped_menu.items():
         body_content += f'<section id="{category.lower().replace(" ", "-")}"><h2>{category}</h2>'
         for dish in dishes:
+            image_url = dish.get("image")
+            if image_url == "placeholder":
+                image_url = "https://via.placeholder.com/150"
+
             body_content += '<div class="dish">'
+            if image_url:
+                body_content += f'<img src="{image_url}" alt="{dish.get("translatedName", "")}" class="dish-img">'
+            
+            body_content += '<div class="dish-details">'
             body_content += '<div class="dish-header">'
             body_content += f'<span class="dish-name">{dish.get("translatedName", "")}</span>'
             body_content += f'<span class="dish-price">{dish.get("price", "")}</span>'
@@ -82,7 +93,8 @@ def generate_html_menu(menu_data: list, output_path: str = "menu.html"):
             if dish.get("containsGluten") == 'yes':
                 body_content += '<span class="allergen-tag">🌾 Содержит глютен</span>'
             body_content += '</div>'
-            body_content += '</div>'
+            body_content += '</div>' # close dish-details
+            body_content += '</div>' # close dish
         body_content += '</section>'
 
     final_html = html_template.replace('<!-- MENU_CONTENT_PLACEHOLDER -->', body_content)

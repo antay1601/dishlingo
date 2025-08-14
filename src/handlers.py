@@ -54,25 +54,64 @@ async def handle_photo(message: Message):
         # Шаг 2: Извлечение JSON и генерация HTML
         await processing_msg.edit_text('Шаг 2/2: Создаю HTML-версию меню...')
         try:
+            # Убираем обертку ```json ... ```, если она есть
             match = re.search(r'```json\s*([\s\S]+?)\s*```', extracted_text, re.DOTALL)
             if match:
                 json_str = match.group(1)
             else:
                 json_str = extracted_text
-            
-            menu_data = json.loads(json_str)
+
+            try:
+                # Пытаемся спарсить как есть
+                data = json.loads(json_str)
+            except json.JSONDecodeError:
+                # Если не удалось и ответ частичный, пытаемся восстановить JSON
+                if '"isPartial": true' in json_str:
+                    print("JSON parsing failed, but isPartial is true. Attempting to repair.")
+                    # Ищем последнее корректное закрытие объекта в массиве
+                    last_obj_end = json_str.rfind('},')
+                    if last_obj_end != -1:
+                        # Обрезаем строку до конца последнего целого объекта
+                        repaired_json_str = json_str[:last_obj_end + 1]
+                        # Закрываем массив и корневой объект
+                        repaired_json_str += '\n  ]\n}'
+                        try:
+                            data = json.loads(repaired_json_str)
+                            data['isPartial'] = True # Убедимся, что флаг установлен
+                            print("Successfully parsed repaired JSON.")
+                        except json.JSONDecodeError as e2:
+                            print(f"Failed to parse even the repaired JSON: {e2}")
+                            raise # Перебрасываем исходную ошибку, если ремонт не удался
+                    else:
+                        raise # Не смогли найти, где обрезать, перебрасываем
+                else:
+                    raise # Ошибка не связана с частичным ответом, перебрасываем
+
+            menu_data = data.get("menu", [])
+            is_partial = data.get("isPartial", False)
+
         except (json.JSONDecodeError, IndexError):
             await message.answer('Не удалось обработать данные из меню. Пожалуйста, попробуйте еще раз.')
             print("Failed to parse JSON from:", extracted_text)
             return
 
+        if not menu_data:
+            await message.answer('Не удалось извлечь ни одного блюда из меню. Пожалуйста, попробуйте с более четким фото.')
+            return
+
         generate_html_menu(menu_data, html_output_path)
+
+        # Формируем подпись к документу
+        caption = "Ваше меню готово!"
+        if is_partial:
+            caption += "\n\n⚠️ *Обратите внимание: меню было распознано не полностью из-за большого размера. Была обработана только часть.*"
 
         # Отправка результата
         await processing_msg.delete()
         await message.answer_document(
             FSInputFile(html_output_path), 
-            caption="Ваше меню готово!"
+            caption=caption,
+            parse_mode='Markdown'
         )
         
     except Exception as e:
